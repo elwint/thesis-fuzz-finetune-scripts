@@ -220,8 +220,8 @@ training_args = TrainingArguments(
     save_strategy=save_strategy,
     save_total_limit=2,
     load_best_model_at_end=load_best_model_at_end,
-    metric_for_best_model="eval_accuracy",
-    greater_is_better=True,
+    metric_for_best_model="eval_loss",
+    greater_is_better=False,
 
     num_train_epochs=6,
     learning_rate=5e-6, # TODO: Fine-tune parameters
