@@ -10,9 +10,9 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 import os
 import wandb
 
-peft_required=False
-model_name = "Salesforce/codegen-350M-multi"
-#model_name = "bigcode/starcoder"
+peft_required=True
+#model_name = "Salesforce/codegen-350M-multi"
+model_name = "bigcode/starcoder"
 
 class SavePeftModelCallback(TrainerCallback):
     def on_save(
@@ -31,20 +31,20 @@ class SavePeftModelCallback(TrainerCallback):
         return control
 
 
-#class LoadBestPeftModelCallback(TrainerCallback):
-#    def on_train_end(
-#        self,
-#        args: TrainingArguments,
-#        state: TrainerState,
-#        control: TrainerControl,
-#        **kwargs,
-#    ):
-#        print(f"Loading best peft model from {state.best_model_checkpoint} (score: {state.best_metric}).")
-#        best_model_path = os.path.join(state.best_model_checkpoint, "adapter_model.bin")
-#        adapters_weights = torch.load(best_model_path)
-#        model = kwargs["model"]
-#        set_peft_model_state_dict(model, adapters_weights)
-#        return control
+class LoadBestPeftModelCallback(TrainerCallback):
+    def on_train_end(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ):
+        print(f"Loading best peft model from {state.best_model_checkpoint} (score: {state.best_metric}).")
+        best_model_path = os.path.join(state.best_model_checkpoint, "adapter_model.bin")
+        adapters_weights = torch.load(best_model_path)
+        model = kwargs["model"]
+        set_peft_model_state_dict(model, adapters_weights)
+        return control
 
 metric = evaluate.load('accuracy')
 class CustomCallback(TrainerCallback):
@@ -61,9 +61,11 @@ class CustomCallback(TrainerCallback):
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.add_special_tokens({'pad_token': tokenizer.eos_token})
+if tokenizer.model_max_length > 1e29:
+    tokenizer.model_max_length = int(input("Enter model max length: "))
 print("Model max length:", tokenizer.model_max_length)
-model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, pad_token_id=tokenizer.eos_token_id)
-#model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, torch_dtype=torch.bfloat16, pad_token_id=tokenizer.eos_token_id)
+#model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, pad_token_id=tokenizer.eos_token_id)
+model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, torch_dtype=torch.bfloat16, pad_token_id=tokenizer.eos_token_id)
 
 #model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, device_map="auto", load_in_8bit=True, pad_token_id=tokenizer.eos_token_id)
 #model = prepare_model_for_int8_training(model)
@@ -136,7 +138,7 @@ def qgen_data_collator(examples) -> dict:
     last_idx = 0
     for idx, mask in enumerate(batch['attention_mask'][0]):
         if mask == 1:
-            batch['labels'][0][idx] = -100 # Only calculate loss for the completion part, ignore prompt + split tokens TODO: Test if accuracy is idd too high if this is not set
+            batch['labels'][0][idx] = -100 # Only calculate loss for the completion part, ignore prompt + split tokens
             last_idx = idx
 
     if batch['input_ids'][0][last_idx] != tok_split_token['input_ids'][-1]:
@@ -160,11 +162,10 @@ def preprocess_logits_for_metrics(logits, labels):
     return logits.argmax(dim=-1)
 
 training_args = TrainingArguments(
+    output_dir="./results",
     overwrite_output_dir=True,
     report_to="wandb",
-    num_train_epochs=4,
-    #bf16=True,
-    output_dir="./results",
+    bf16=True,
     evaluation_strategy="epoch",
     #evaluation_strategy="steps",
     #eval_steps=1,
@@ -172,11 +173,18 @@ training_args = TrainingArguments(
     logging_first_step=True,
 
     save_strategy="epoch",
+    save_total_limit=2,
+    load_best_model_at_end=True,
+    metric_for_best_model="eval_accuracy",
+    greater_is_better=True,
 
-    learning_rate=2e-5, # TODO: Fine-tune parameters
-    weight_decay=0.01,
+    num_train_epochs=6,
+    learning_rate=5e-6, # TODO: Fine-tune parameters
+    lr_scheduler_type="cosine",
+    weight_decay=0.005,
     per_device_train_batch_size=1, # TODO: Test with batch size?
     per_device_eval_batch_size=1,
+    # gradient_accumulation_steps=16,
 
     # Memory saving strats
     eval_accumulation_steps=1,
@@ -196,10 +204,10 @@ trainer = Trainer(
 trainer.add_callback(CustomCallback(trainer))
 if peft_required:
     trainer.add_callback(SavePeftModelCallback)
-    #trainer.add_callback(LoadBestPeftModelCallback)
+    trainer.add_callback(LoadBestPeftModelCallback)
 
 trainer.train()
 
 wandb.finish()
 
-trainer.save_model()
+#trainer.save_model()
