@@ -89,6 +89,11 @@ tok_split_token = tokenizer(datasetSplitToken)
 datasetEndToken = ' END' # No need to check end token, because it will be replaced
 print(tokenizer.eos_token, tokenizer.eos_token_id)
 
+def remove_suffix(input_string, suffix):
+    if suffix and input_string.endswith(suffix):
+        return input_string[:-len(suffix)]
+    return input_string
+
 # This function preprocesses an example input, a dictionary with 'prompt' and 'completion' keys. 
 # It ensures 'prompt' ends with a specific token (datasetSplitToken) and 'completion' ends with another (datasetEndToken).
 # Both 'prompt' and 'completion' are tokenized, with 'prompt' being truncated if it exceeds permissible length, 
@@ -98,7 +103,7 @@ print(tokenizer.eos_token, tokenizer.eos_token_id)
 def preprocess_function(example):
     if not example['prompt'].endswith(datasetSplitToken):
         raise Exception("prompt does not contain split token")
-    prompt = example['prompt'].removesuffix(datasetSplitToken) # split token is re-added later
+    prompt = remove_suffix(example['prompt'], datasetSplitToken) # split token is re-added later
     
     if not example['completion'].endswith(datasetEndToken):
         raise Exception("completion does not contain end token")
