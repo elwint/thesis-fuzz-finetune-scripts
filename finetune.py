@@ -10,10 +10,15 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 import os
 import wandb
 
+test_mode=True
 bf16=True
 peft_required=True
-#model_name = "Salesforce/codegen-350M-multi"
 model_name = "bigcode/starcoder"
+
+if test_mode:
+    model_name = "Salesforce/codegen-350M-multi"
+    bf16=False
+    peft_required=False
 
 class SavePeftModelCallback(TrainerCallback):
     def on_save(
@@ -189,20 +194,32 @@ def preprocess_logits_for_metrics(logits, labels):
         logits = logits[0]
     return logits.argmax(dim=-1)
 
+save_strategy="epoch"
+evaluation_strategy="epoch"
+eval_steps=None
+logging_steps=5
+load_best_model_at_end=True
+
+if test_mode:
+    save_strategy="no"
+    evaluation_strategy="steps"
+    eval_steps=1
+    logging_steps=1
+    load_best_model_at_end=False
+
 training_args = TrainingArguments(
     output_dir="./results",
     overwrite_output_dir=True,
     report_to="wandb",
     bf16=bf16,
-    evaluation_strategy="epoch",
-    #evaluation_strategy="steps",
-    #eval_steps=1,
-    logging_steps=5,
+    evaluation_strategy=evaluation_strategy,
+    eval_steps=eval_steps,
+    logging_steps=logging_steps,
     logging_first_step=True,
 
-    save_strategy="epoch",
+    save_strategy=save_strategy,
     save_total_limit=2,
-    load_best_model_at_end=True,
+    load_best_model_at_end=load_best_model_at_end,
     metric_for_best_model="eval_accuracy",
     greater_is_better=True,
 
