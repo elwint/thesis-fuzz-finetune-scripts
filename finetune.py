@@ -10,6 +10,7 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 import os
 import wandb
 
+bf16=True
 peft_required=True
 #model_name = "Salesforce/codegen-350M-multi"
 model_name = "bigcode/starcoder"
@@ -64,8 +65,10 @@ tokenizer.add_special_tokens({'pad_token': tokenizer.eos_token})
 if tokenizer.model_max_length > 1e29:
     tokenizer.model_max_length = int(input("Enter model max length: "))
 print("Model max length:", tokenizer.model_max_length)
-#model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, pad_token_id=tokenizer.eos_token_id)
-model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, torch_dtype=torch.bfloat16, pad_token_id=tokenizer.eos_token_id)
+if bf16:
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, torch_dtype=torch.bfloat16, pad_token_id=tokenizer.eos_token_id)
+else:
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, pad_token_id=tokenizer.eos_token_id)
 
 #model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, device_map="auto", load_in_8bit=True, pad_token_id=tokenizer.eos_token_id)
 #model = prepare_model_for_int8_training(model)
@@ -143,7 +146,7 @@ def qgen_data_collator(examples) -> dict:
     last_idx = 0
     for idx, mask in enumerate(batch['attention_mask'][0]):
         if mask == 1:
-            batch['labels'][0][idx] = -100 # Only calculate loss for the completion part, ignore prompt + split tokens
+            batch['labels'][0][idx] = -100 # Only calculate loss and acc for the completion part, ignore prompt + split tokens
             last_idx = idx
 
     if batch['input_ids'][0][last_idx] != tok_split_token['input_ids'][-1]:
@@ -153,11 +156,31 @@ def qgen_data_collator(examples) -> dict:
 
 def compute_metrics(eval_preds):
     preds, labels = eval_preds
+
+    labels_noshift = labels.reshape(-1)
+    preds_noshift = preds.reshape(-1)
+
+    mask = labels_noshift != -100
+    labels_noshift = labels_noshift[mask]
+    preds_noshift = preds_noshift[mask]
+
+    acc_noshift = metric.compute(predictions=preds_noshift, references=labels_noshift)
+
     # preds have the same shape as the labels, after the argmax(-1) has been calculated
     # by preprocess_logits_for_metrics but we need to shift the labels
     labels = labels[:, 1:].reshape(-1)
     preds = preds[:, :-1].reshape(-1)
-    return metric.compute(predictions=preds, references=labels)
+
+    mask = labels != -100
+    labels = labels[mask]
+    preds = preds[mask]
+
+    acc = metric.compute(predictions=preds, references=labels)
+
+    return {
+            "accuracy": acc["accuracy"],
+            "accuracy_noshift": acc_noshift["accuracy"],
+    }
 
 def preprocess_logits_for_metrics(logits, labels):
     if isinstance(logits, tuple):
@@ -170,7 +193,7 @@ training_args = TrainingArguments(
     output_dir="./results",
     overwrite_output_dir=True,
     report_to="wandb",
-    bf16=True,
+    bf16=bf16,
     evaluation_strategy="epoch",
     #evaluation_strategy="steps",
     #eval_steps=1,
