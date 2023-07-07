@@ -166,7 +166,7 @@ def qgen_data_collator(examples) -> dict:
     last_idx = 0
     for idx, mask in enumerate(batch['attention_mask'][0]):
         if mask == 1:
-            batch['labels'][0][idx] = -100 # Only calculate loss and acc for the completion part, ignore prompt + split tokens
+            batch['labels'][0][idx] = -100 # Only calculate loss and acc for the completion part, ignore prompt + split tokens (set to -100)
             last_idx = idx
 
     if batch['input_ids'][0][last_idx] != tok_split_token['input_ids'][-1]:
