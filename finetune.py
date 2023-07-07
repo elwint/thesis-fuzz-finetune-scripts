@@ -9,16 +9,19 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training, se
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 import os
 import wandb
+import sys
 
-test_mode=True
+test_mode=False
 bf16=True
 peft_required=True
+resume_from_checkpoint=sys.argv[1]
 model_name = "bigcode/starcoder"
 
 if test_mode:
     model_name = "Salesforce/codegen-350M-multi"
     bf16=False
     peft_required=False
+    resume_from_checkpoint=False
 
 class SavePeftModelCallback(TrainerCallback):
     def on_save(
@@ -91,6 +94,18 @@ if peft_required:
 
     model.enable_input_require_grads()
     model = get_peft_model(model, lora_config)
+    if resume_from_checkpoint:
+        # Check the available weights and load them
+        checkpoint_name = os.path.join(
+            resume_from_checkpoint, "adapter_model.bin"
+        )  # only LoRA model - LoRA config above has to fit
+        resume_from_checkpoint = False  # So the trainer won't try loading its state
+        if os.path.exists(checkpoint_name):
+            print(f"Restarting from {checkpoint_name}")
+            adapters_weights = torch.load(checkpoint_name)
+            set_peft_model_state_dict(model, adapters_weights)
+        else:
+            print(f"Checkpoint {checkpoint_name} not found")
 
 datasetSplitToken = "\n\n###\n\n"
 tok_split_token = tokenizer(datasetSplitToken)
@@ -209,7 +224,7 @@ if test_mode:
 
 training_args = TrainingArguments(
     output_dir="./results",
-    overwrite_output_dir=True,
+    #overwrite_output_dir=True,
     report_to="wandb",
     bf16=bf16,
     evaluation_strategy=evaluation_strategy,
@@ -251,7 +266,10 @@ if peft_required:
     trainer.add_callback(SavePeftModelCallback)
     trainer.add_callback(LoadBestPeftModelCallback)
 
-trainer.train()
+if resume_from_checkpoint:
+    trainer.train(resume_from_checkpoint=True)
+else:
+    trainer.train()
 
 wandb.finish()
 
