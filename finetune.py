@@ -15,6 +15,8 @@ test_mode=False
 bf16=True
 peft_required=True
 resume_from_checkpoint=sys.argv[1]
+if resume_from_checkpoint == "False":
+    resume_from_checkpoint=False
 model_name = "bigcode/starcoder"
 
 if test_mode:

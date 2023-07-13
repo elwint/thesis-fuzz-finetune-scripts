@@ -11,15 +11,13 @@ import os
 import wandb
 import sys
 
-test_mode=True
+test_mode=False
 bf16=True
-resume_from_checkpoint=True
+resume_from_checkpoint=False
 model_name = "Salesforce/codet5p-16b"
 
 if test_mode:
     model_name = "Salesforce/codet5p-220m"
-    bf16=False
-    resume_from_checkpoint=False
 
 metric = evaluate.load('accuracy')
 class CustomCallback(TrainerCallback):
@@ -39,12 +37,9 @@ if tokenizer.model_max_length > 1e29:
     tokenizer.model_max_length = int(input("Enter model input max length: "))
 print("Model input max length:", tokenizer.model_max_length)
 if bf16:
-    model = T5ForConditionalGeneration.from_pretrained(model_name, device_map="auto", trust_remote_code=True, torch_dtype=torch.bfloat16, pad_token_id=tokenizer.eos_token_id)
+    model = T5ForConditionalGeneration.from_pretrained(model_name, trust_remote_code=True, torch_dtype=torch.bfloat16)
 else:
-    model = T5ForConditionalGeneration.from_pretrained(model_name, device_map="auto", trust_remote_code=True, pad_token_id=tokenizer.eos_token_id)
-
-#model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, device_map="auto", load_in_8bit=True, pad_token_id=tokenizer.eos_token_id)
-#model = prepare_model_for_int8_training(model)
+    model = T5ForConditionalGeneration.from_pretrained(model_name, device_map="auto", trust_remote_code=True)
 
 # Remove both split token and end token for seq2seq
 datasetSplitToken = "\n\n###\n\n"
@@ -92,10 +87,11 @@ def compute_metrics(eval_preds):
     mask = labels_noshift != -100
     labels_noshift = labels_noshift[mask]
     preds_noshift = preds_noshift[mask]
-    print("--- LABELS ---")
-    print(tokenizer.decode(labels_noshift))
-    print("--- PREDS ---")
-    print(tokenizer.decode(preds_noshift))
+
+    # print("--- LABELS ---")
+    # print(tokenizer.decode(labels_noshift))
+    # print("--- PREDS ---")
+    # print(tokenizer.decode(preds_noshift))
 
     acc_noshift = metric.compute(predictions=preds_noshift, references=labels_noshift)
 
@@ -151,7 +147,7 @@ training_args = Seq2SeqTrainingArguments(
     metric_for_best_model="eval_loss",
     greater_is_better=False,
 
-    num_train_epochs=18,
+    num_train_epochs=44,
     learning_rate=5e-6, # TODO: Fine-tune parameters
     lr_scheduler_type="cosine",
     weight_decay=0.005,
