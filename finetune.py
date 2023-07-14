@@ -12,6 +12,7 @@ import wandb
 import sys
 
 test_mode=False
+
 bf16=True
 peft_required=True
 resume_from_checkpoint=sys.argv[1]
@@ -23,7 +24,6 @@ if test_mode:
     model_name = "Salesforce/codegen-350M-multi"
     bf16=False
     peft_required=False
-    resume_from_checkpoint=False
 
 class SavePeftModelCallback(TrainerCallback):
     def on_save(

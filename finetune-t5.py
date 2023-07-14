@@ -3,21 +3,57 @@ import torch
 import json
 from datasets import Dataset, load_dataset
 import evaluate
-from transformers import AutoTokenizer, T5ForConditionalGeneration, Seq2SeqTrainingArguments, Seq2SeqTrainer, DataCollatorForSeq2Seq, TrainerCallback, TrainerState, TrainerControl
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, Seq2SeqTrainingArguments, Seq2SeqTrainer, DataCollatorForSeq2Seq, TrainerCallback, TrainerState, TrainerControl
 from copy import deepcopy
-from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training, set_peft_model_state_dict
+from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_int8_training, set_peft_model_state_dict
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 import os
 import wandb
 import sys
 
 test_mode=False
-bf16=True
-resume_from_checkpoint=False
-model_name = "Salesforce/codet5p-16b"
+
+dtype=torch.float16
+resume_from_checkpoint=sys.argv[1]
+if resume_from_checkpoint == "False":
+    resume_from_checkpoint=False
+model_name = "./codet5p-16b"
+peft_required=True
 
 if test_mode:
-    model_name = "Salesforce/codet5p-220m"
+    model_name = "./codet5p-2b"
+
+class SavePeftModelCallback(TrainerCallback):
+    def on_save(
+        self,
+        args: Seq2SeqTrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ):
+        checkpoint_folder = os.path.join(args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{state.global_step}")
+
+        kwargs["model"].save_pretrained(checkpoint_folder)
+
+        pytorch_model_path = os.path.join(checkpoint_folder, "pytorch_model.bin")
+        torch.save({}, pytorch_model_path)
+        return control
+
+
+class LoadBestPeftModelCallback(TrainerCallback):
+    def on_train_end(
+        self,
+        args: Seq2SeqTrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ):
+        print(f"Loading best peft model from {state.best_model_checkpoint} (score: {state.best_metric}).")
+        best_model_path = os.path.join(state.best_model_checkpoint, "adapter_model.bin")
+        adapters_weights = torch.load(best_model_path)
+        model = kwargs["model"]
+        set_peft_model_state_dict(model, adapters_weights)
+        return control
 
 metric = evaluate.load('accuracy')
 class CustomCallback(TrainerCallback):
@@ -36,10 +72,37 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 if tokenizer.model_max_length > 1e29:
     tokenizer.model_max_length = int(input("Enter model input max length: "))
 print("Model input max length:", tokenizer.model_max_length)
-if bf16:
-    model = T5ForConditionalGeneration.from_pretrained(model_name, trust_remote_code=True, torch_dtype=torch.bfloat16)
+if dtype == torch.float16: # Do not set torch_dtype, internally it's already float16
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True, decoder_start_token_id=50256, pad_token_id=50256)
 else:
-    model = T5ForConditionalGeneration.from_pretrained(model_name, device_map="auto", trust_remote_code=True)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, decoder_start_token_id=50256, pad_token_id=50256)
+
+model.config.use_cache = False
+
+if peft_required:
+    #model = prepare_model_for_int8_training(model)
+    lora_config = LoraConfig(
+        task_type=TaskType.SEQ_2_SEQ_LM,
+        inference_mode=False, r=8,
+        lora_alpha=32,
+        lora_dropout=0.1,
+        target_modules=["q_proj", "v_proj"],
+    )
+
+    model.enable_input_require_grads()
+    model = get_peft_model(model, lora_config)
+    if resume_from_checkpoint:
+        # Check the available weights and load them
+        checkpoint_name = os.path.join(
+            resume_from_checkpoint, "adapter_model.bin"
+        )  # only LoRA model - LoRA config above has to fit
+        resume_from_checkpoint = False  # So the trainer won't try loading its state
+        if os.path.exists(checkpoint_name):
+            print(f"Restarting from {checkpoint_name}")
+            adapters_weights = torch.load(checkpoint_name)
+            set_peft_model_state_dict(model, adapters_weights)
+        else:
+            print(f"Checkpoint {checkpoint_name} not found")
 
 # Remove both split token and end token for seq2seq
 datasetSplitToken = "\n\n###\n\n"
@@ -124,6 +187,14 @@ eval_steps=None
 logging_steps=5
 load_best_model_at_end=True
 
+if dtype == torch.bfloat16:
+    bf16=True
+    fp16=False
+
+if dtype == torch.float16:
+    bf16=False
+    fp16=True
+
 if test_mode:
     save_strategy="no"
     evaluation_strategy="steps"
@@ -136,6 +207,7 @@ training_args = Seq2SeqTrainingArguments(
     #overwrite_output_dir=True,
     report_to="wandb",
     bf16=bf16,
+    fp16=fp16,
     evaluation_strategy=evaluation_strategy,
     eval_steps=eval_steps,
     logging_steps=logging_steps,
@@ -158,6 +230,9 @@ training_args = Seq2SeqTrainingArguments(
     # Memory saving strats
     eval_accumulation_steps=1,
     gradient_checkpointing=True,
+
+    # Seq2seq specific
+    predict_with_generate=True,
 )
 
 trainer = Seq2SeqTrainer(
@@ -171,8 +246,14 @@ trainer = Seq2SeqTrainer(
 )
 
 trainer.add_callback(CustomCallback(trainer))
+if peft_required:
+    trainer.add_callback(SavePeftModelCallback)
+    trainer.add_callback(LoadBestPeftModelCallback)
 
-trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+if resume_from_checkpoint:
+    trainer.train(resume_from_checkpoint=True)
+else:
+    trainer.train()
 
 wandb.finish()
 
