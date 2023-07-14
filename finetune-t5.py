@@ -232,7 +232,7 @@ training_args = Seq2SeqTrainingArguments(
     gradient_checkpointing=True,
 
     # Seq2seq specific
-    predict_with_generate=True,
+    #predict_with_generate=True,
 )
 
 trainer = Seq2SeqTrainer(
