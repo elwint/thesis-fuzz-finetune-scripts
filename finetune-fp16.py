@@ -243,7 +243,7 @@ training_args = TrainingArguments(
     logging_first_step=True,
 
     save_strategy=save_strategy,
-    save_total_limit=3,
+    save_total_limit=2,
     load_best_model_at_end=load_best_model_at_end,
     metric_for_best_model="eval_loss",
     greater_is_better=False,

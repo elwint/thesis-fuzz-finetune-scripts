@@ -120,8 +120,7 @@ def preprocess_function(example):
     
     if not example['completion'].endswith(datasetEndToken):
         raise Exception("completion does not contain end token")
-    completion = remove_suffix(example['completion'], datasetEndToken)
-
+    completion = remove_suffix(example['completion'], datasetEndToken) # bos and end tokens will be handled by DataCollatorForSeq2Seq
 
     tok_input = tokenizer(prompt, truncation=True, max_length=tokenizer.model_max_length)
     if len(tok_input['input_ids']) == tokenizer.model_max_length:
@@ -215,7 +214,7 @@ training_args = Seq2SeqTrainingArguments(
     logging_first_step=True,
 
     save_strategy=save_strategy,
-    save_total_limit=3,
+    save_total_limit=2,
     load_best_model_at_end=load_best_model_at_end,
     metric_for_best_model="eval_loss",
     greater_is_better=False,
