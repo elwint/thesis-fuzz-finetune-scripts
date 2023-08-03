@@ -211,6 +211,7 @@ def preprocess_logits_for_metrics(logits, labels):
         logits = logits[0]
     return logits.argmax(dim=-1)
 
+learning_rate=3e-5
 save_strategy="epoch"
 evaluation_strategy="epoch"
 eval_steps=None
@@ -225,7 +226,7 @@ if test_mode:
     load_best_model_at_end=False
 
 training_args = TrainingArguments(
-    output_dir="./results",
+    output_dir=model_name+"-"+str(learning_rate),
     #overwrite_output_dir=True,
     report_to="wandb",
     bf16=bf16,
@@ -241,7 +242,7 @@ training_args = TrainingArguments(
     greater_is_better=False,
 
     num_train_epochs=18,
-    learning_rate=5e-6, # TODO: Fine-tune parameters
+    learning_rate=learning_rate,
     lr_scheduler_type="cosine",
     weight_decay=0.005,
     per_device_train_batch_size=1, # TODO: Test with batch size?
