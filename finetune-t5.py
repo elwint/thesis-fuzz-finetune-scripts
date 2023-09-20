@@ -17,8 +17,18 @@ dtype=torch.float16
 resume_from_checkpoint=sys.argv[1]
 if resume_from_checkpoint == "False":
     resume_from_checkpoint=False
-model_name = "./codet5p-16b"
-peft_required=True
+model_name = "Salesforce/codet5p-220m"
+peft_required=False
+overwrite_max_length=True
+out_dir="/mnt/temp/"
+#out_dir="./"
+
+learning_rate=3e-4
+save_strategy="epoch"
+evaluation_strategy="epoch"
+eval_steps=None
+logging_steps=5
+load_best_model_at_end=True
 
 if test_mode:
     model_name = "./codet5p-2b"
@@ -69,11 +79,17 @@ class CustomCallback(TrainerCallback):
 
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+if overwrite_max_length:
+    tokenizer.model_max_length = 2048
+    print("WARNING: OVERWRITING DETECTED MAX LENGTH")
+
 if tokenizer.model_max_length > 1e29:
     tokenizer.model_max_length = int(input("Enter model input max length: "))
 print("Model input max length:", tokenizer.model_max_length)
 if dtype == torch.float16: # Do not set torch_dtype, internally it's already float16
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True, decoder_start_token_id=50256, pad_token_id=50256)
+    #model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True, decoder_start_token_id=50256, pad_token_id=50256)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True)
 else:
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, decoder_start_token_id=50256, pad_token_id=50256)
 
@@ -180,12 +196,6 @@ def preprocess_logits_for_metrics(logits, labels):
         logits = logits[0]
     return logits.argmax(dim=-1)
 
-learning_rate=3e-5
-save_strategy="epoch"
-evaluation_strategy="epoch"
-eval_steps=None
-logging_steps=5
-load_best_model_at_end=True
 
 if dtype == torch.bfloat16:
     bf16=True
@@ -203,7 +213,7 @@ if test_mode:
     load_best_model_at_end=False
 
 training_args = Seq2SeqTrainingArguments(
-    output_dir=model_name+"-"+str(learning_rate),
+    output_dir=out_dir+model_name+"-"+str(learning_rate)+"-peft"+str(peft_required),
     #overwrite_output_dir=True,
     report_to="wandb",
     bf16=bf16,

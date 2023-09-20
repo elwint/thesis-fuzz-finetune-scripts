@@ -13,17 +13,28 @@ import sys
 
 test_mode=False
 
-bf16=True
-peft_required=True
+dtype=torch.bfloat16
 resume_from_checkpoint=sys.argv[1]
 if resume_from_checkpoint == "False":
     resume_from_checkpoint=False
-model_name = "bigcode/starcoder"
+model_name = "Salesforce/codegen25-7b-multi"
+
+learning_rate=3e-4
+save_strategy="epoch"
+evaluation_strategy="epoch"
+eval_steps=None
+logging_steps=5
+load_best_model_at_end=True
+
+peft_required=True
+#target_modules = ["c_proj", "c_attn", "q_attn"]
+target_modules = ["q_proj", "v_proj"]
+out_dir="./"
+if not peft_required:
+    out_dir="/mnt/temp/"
 
 if test_mode:
     model_name = "Salesforce/codegen-350M-multi"
-    bf16=False
-    peft_required=False
 
 class SavePeftModelCallback(TrainerCallback):
     def on_save(
@@ -75,10 +86,10 @@ tokenizer.add_special_tokens({'pad_token': tokenizer.eos_token})
 if tokenizer.model_max_length > 1e29:
     tokenizer.model_max_length = int(input("Enter model max length: "))
 print("Model max length:", tokenizer.model_max_length)
-if bf16:
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, torch_dtype=torch.bfloat16, pad_token_id=tokenizer.eos_token_id)
+if dtype == torch.float16: # Do not set torch_dtype, internally it's already float16
+    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, device_map="auto", pad_token_id=tokenizer.eos_token_id)
 else:
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", trust_remote_code=True, pad_token_id=tokenizer.eos_token_id)
+    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, device_map="auto", torch_dtype=dtype, pad_token_id=tokenizer.eos_token_id)
 
 #model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, device_map="auto", load_in_8bit=True, pad_token_id=tokenizer.eos_token_id)
 #model = prepare_model_for_int8_training(model)
@@ -91,7 +102,7 @@ if peft_required:
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
-        target_modules = ["c_proj", "c_attn", "q_attn"]
+        target_modules = target_modules
     )
 
     model.enable_input_require_grads()
@@ -211,12 +222,14 @@ def preprocess_logits_for_metrics(logits, labels):
         logits = logits[0]
     return logits.argmax(dim=-1)
 
-learning_rate=3e-5
-save_strategy="epoch"
-evaluation_strategy="epoch"
-eval_steps=None
-logging_steps=5
-load_best_model_at_end=True
+
+if dtype == torch.bfloat16:
+    bf16=True
+    fp16=False
+
+if dtype == torch.float16:
+    bf16=False
+    fp16=True
 
 if test_mode:
     save_strategy="no"
@@ -226,10 +239,11 @@ if test_mode:
     load_best_model_at_end=False
 
 training_args = TrainingArguments(
-    output_dir=model_name+"-"+str(learning_rate),
+    output_dir=out_dir+model_name+"-"+str(learning_rate)+"-peft"+str(peft_required),
     #overwrite_output_dir=True,
     report_to="wandb",
     bf16=bf16,
+    fp16=fp16,
     evaluation_strategy=evaluation_strategy,
     eval_steps=eval_steps,
     logging_steps=logging_steps,
@@ -241,7 +255,7 @@ training_args = TrainingArguments(
     metric_for_best_model="eval_loss",
     greater_is_better=False,
 
-    num_train_epochs=18,
+    num_train_epochs=44,
     learning_rate=learning_rate,
     lr_scheduler_type="cosine",
     weight_decay=0.005,
