@@ -3,10 +3,10 @@ import wandb
 import pandas as pd
 
 # Initialize wandb
-wandb.init(project='csv_metrics', name='base-csv_line_plot')
+wandb.init(project='csv_metrics', name='pt-csv_line_plot')
 
 # Load the CSV data from a file
-dfs = [pd.read_csv('results-base-1.csv'), pd.read_csv('results-base-2.csv'), pd.read_csv('results-base-3.csv'), pd.read_csv('results-base-4.csv'), pd.read_csv('results-base-5.csv'), pd.read_csv('results-base-6.csv')]
+dfs = [pd.read_csv('results-pt-1.csv'), pd.read_csv('results-pt-2.csv'), pd.read_csv('results-pt-3.csv'), pd.read_csv('results-pt-4.csv')]
 
 # Iterate over the dataframe rows and log the metrics
 for df in dfs:
